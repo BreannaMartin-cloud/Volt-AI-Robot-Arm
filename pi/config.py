@@ -35,6 +35,59 @@ SERVO_MAX_PULSE = 2500
 # Smooth-move step delay (seconds). Arduino used delay(10) i.e. 10ms/degree.
 MOVE_STEP_DELAY = 0.01
 
+# The very first move after the Pi (re)starts is slower than that, on
+# purpose - see arm.py's confirm_and_home(). This matters because the servo
+# horns are open-loop: nothing in software actually knows the true physical
+# angle of a joint until it's been moved and tracked at least once. If the
+# arm loses power (script restart, reboot, unplug) while sitting anywhere
+# other than exactly HOME_POSE, the first move after power returns is a
+# jump from an assumed position to a commanded one, not a small correction.
+FIRST_MOVE_STEP_DELAY = 0.03
+
+# ---------------------------------------------------------------------------
+# Per-joint calibration - THIS IS THE PART YOU NEED TO SET UP BY HAND
+# ---------------------------------------------------------------------------
+# Hobby servo horns only index onto the spline in fixed increments (usually
+# ~15-17 degrees apart, since most horns have 21-25 teeth). That means when
+# you physically screwed a horn/arm segment onto a servo, there's basically
+# no chance "90" in software landed exactly on the physical angle you wanted
+# for that joint's home/rest position - it's very likely off by anywhere
+# from a couple degrees to over ten.
+#
+# SERVO_TRIM lets you correct that in software instead of re-splining a
+# horn: it's added to every angle you command for that joint before it's
+# sent to the servo. Find these values with calibrate.py's `trim` command -
+# it walks you through nudging a joint until it visually matches the pose
+# you want, then prints the trim value to paste here.
+#
+# Defaults are 0 (no correction) - until you calibrate per joint, angles in
+# this file are only as accurate as your horn placement happened to be.
+SERVO_TRIM = {
+    "base": 0,
+    "shoulder": 0,
+    "elbow": 0,
+    "wrist_pitch": 0,
+    "wrist_roll": 0,
+    "gripper": 0,
+}
+
+# SOFT_LIMITS constrain each joint to the range that's actually safe on
+# YOUR frame - tighter than the servo's mechanical 0-180 sweep. Values
+# outside this range are clamped before being sent to the servo, in
+# move_joint_smooth/move_pose_smooth AND in the trim-adjusted _write().
+# These defaults are conservative placeholders, not verified for your
+# build - use calibrate.py's `limits` command to test and narrow them,
+# especially shoulder/elbow (frame collisions) and gripper (mechanical
+# stop, so it doesn't stall the motor against itself).
+SOFT_LIMITS = {
+    "base": (0, 180),
+    "shoulder": (20, 160),
+    "elbow": (20, 160),
+    "wrist_pitch": (0, 180),
+    "wrist_roll": (0, 180),
+    "gripper": (30, 150),
+}
+
 # ---------------------------------------------------------------------------
 # OLED
 # ---------------------------------------------------------------------------
@@ -166,3 +219,10 @@ POSES = {
 # For gripper-only moves, use arm.open_gripper() / arm.close_gripper() instead
 # of a named full pose - GRIPPER_OPEN / GRIPPER_CLOSED above are the values
 # those use.
+
+# ---------------------------------------------------------------------------
+# Persisted pose state (see arm.py) - lets the Pi remember the last angle it
+# commanded each joint to across script restarts, instead of blindly
+# assuming every joint is at 90 on every boot.
+# ---------------------------------------------------------------------------
+STATE_FILE_PATH = "/home/bre/.volt_arm_state.json"

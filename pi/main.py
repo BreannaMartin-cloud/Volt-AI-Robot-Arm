@@ -87,7 +87,7 @@ def main():
     buzzer = Buzzer()
     vision = Vision()
 
-    arm.go_home()
+    arm.confirm_and_home()
     eyes.draw_open_eyes()
     eyes.start_idle()
 

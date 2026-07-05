@@ -1,138 +1,146 @@
-# VOLT - voice-controlled 6DOF arm (Raspberry Pi 4B)
+# Volt AI Robot Arm
 
-Python port of your Arduino sequences (`6DOF_TESTING_AND_CALIBRATION.ino`,
-`6DOF_ROBOTIC_ARM_COLOR_SORTING.ino`, `6DOF-stacking.ino`), driven off the Pi
-instead of the Arduino, with mic-based wake/command detection added per your
-objectives sheet.
+A 6-DOF robot arm project with two parallel builds:
 
-## Commands implemented
+- **`arduino/`** - three standalone sketches (testing/calibration,
+  color-sorting, stacking) that drive the arm directly from an Arduino.
+- **`pi/`** - a Python port of the same arm control logic for a Raspberry Pi
+  4 driving the servos over I2C through a PCA9685, plus voice commands
+  ("Hi Volt!", "Grab Volt!", etc.), an OLED face, a buzzer, and camera-based
+  vision/face-tracking.
 
-| Say | What happens |
+Both talk to the same 6 joints in the same order everywhere in this repo:
+**base, shoulder, elbow, wrist pitch, wrist roll, gripper.**
+
+## Why all three Arduino sketches are for the same frame
+
+All three sketches (`6DOF_TESTING_AND_CALIBRATION`,
+`6DOF_ROBOTIC_ARM_COLOR_SORTING`, `6DOF_STACKING`) use the identical pin
+map:
+
+| Joint | Pin |
 |---|---|
-| "Hi Volt!" | Wave gesture + happy eyes on OLED |
-| "Grab Volt!" | Watches camera for motion/an object, runs pick-and-place sequence |
-| "Dance Volt!" | Dance sequence + buzzer jingle |
-| "Do a shimmy Volt!" | Shimmy sequence + a different buzzer jingle |
-| "What's this Volt?" | Looks at object, guesses its color, shows guess on OLED |
+| Base | 3 |
+| Shoulder | 5 |
+| Elbow | 6 |
+| Wrist pitch | 9 |
+| Wrist roll | 10 |
+| Gripper | 11 |
 
-## Files
+and the identical joint order and 0-180 degree convention. That's a strong
+signal (not a coincidence) that they were all written against the same
+physical kit/frame - this pin layout matches the common 6-DOF acrylic arm
+kits sold with an Arduino example sketch using exactly these pins, and
+whoever wrote the color-sorting and stacking sketches was clearly starting
+from that same base sketch and layering behavior on top (the movement
+helpers - `moveSmooth`, `smoothServoMove`, `moveArmSmooth` - are the same
+idea reimplemented three times with small naming differences, which is
+what you'd expect from incremental copies of one starting sketch rather
+than three independently-designed programs).
 
-| File | Purpose |
-|---|---|
-| `config.py` | all settings, pin/channel maps, poses, sequences |
-| `arm.py` | PCA9685 servo control - all 6 joints move **simultaneously** now |
-| `oled.py` | eyes: open, blink, happy, thinking, listening, confused, tracking |
-| `buzzer.py` | dance/shimmy jingles |
-| `vision.py` | motion detection (grab trigger) + object identification |
-| `wake.py` | Vosk grammar-based voice commands |
-| `main.py` | ties it all together into the voice-command loop |
-| `calibrate.py` | interactive joint-by-joint tuning tool |
-| `track.py` | live face tracking (MediaPipe) - separate mode from voice commands |
-| `debug.py` | console FPS/status overlay, used by `track.py` |
+So: if your physical wiring matches that pin table, all three sketches
+should be electrically compatible with your frame. What they can't
+guarantee is that the *angles* in the code line up with the true physical
+position of each joint on your specific build - see below.
 
-## Install
+## The actual danger: servo horns vs. software angles
 
-```bash
-pip3 install adafruit-circuitpython-servokit luma.oled RPi.GPIO vosk sounddevice mediapipe --break-system-packages
+Hobby servos are open-loop - once a horn is screwed onto the servo spline,
+neither the Arduino nor the Pi has any way to sense where that joint
+really is. All the code can do is remember what angle it last *commanded*.
+Two things follow from that:
+
+1. **If a horn wasn't attached at exactly the angle the code assumes for
+   "home"**, then commanding "elbow = 65" (or whatever the sketch calls
+   home) does not put that joint where the sketch's author intended - it's
+   off by however many degrees the horn was rotated from true. Most servo
+   horns only index onto the spline in ~15-17 degree steps (21-25 teeth),
+   so landing exactly on-angle by horn placement alone is close to
+   impossible - some mismatch is normal, not a mistake you made.
+2. **The moment a servo is attached/powered, it snaps at full speed toward
+   whatever angle it's told**, with no ramp, regardless of where it
+   physically was a moment before. The "smooth" ramping in all of these
+   sketches only paces how fast *software* updates its target - it can't
+   make the servo itself move gently if the very first commanded angle is
+   far from the joint's true resting angle.
+
+Put together, this is exactly the hazard you described: the arm rests
+folded at the elbow with the claw down on the desk while unpowered - that's
+normal, gravity plus a folded pose. The risk is what happens the instant
+you power on or start a script: if the elbow's true resting angle doesn't
+match what the code assumes, the very first move can be a bigger, faster,
+more sudden motion than the "smooth" ramp implies, right as the claw is
+sitting on (or near) the desk and possibly near your hands.
+
+### What was changed to address this
+
+- **Every Arduino sketch now waits for you to type `ARM`** over Serial
+  before attaching any servo or moving anything. Use that pause to clear
+  the area and be ready to support the arm. The first move after `ARM` also
+  runs at a slower step delay than normal.
+- **Every Arduino sketch now has per-joint soft limits** (`limitLoX`/
+  `limitHiX` in the testing sketch, adjustable at runtime with
+  `LIMIT <A-F> <lo> <hi>`) so a bad command can't drive a joint past a
+  range you've confirmed is safe on your frame.
+- **On the Pi side, `arm.py` never silently assumes every joint is at 90.**
+  `confirm_and_home()` treats the first move of a fresh run as a genuine
+  unknown, warns, and waits for you to type `arm`. It also persists the
+  last commanded pose to disk so a script restart (not a power cycle)
+  doesn't reset that assumption.
+- **`config.py` gained `SERVO_TRIM` and `SOFT_LIMITS`**, and
+  `calibrate.py` gained `trim` and `limits` commands, so you can correct
+  for a horn that wasn't installed exactly on-angle without taking it back
+  off the spline - see `pi/README.md`'s "Calibrating a new build" section
+  for the exact steps.
+
+### What you still need to do physically
+
+No amount of software can substitute for actually checking, joint by
+joint, where your horns landed. Do this once, with the arm supported and
+the area clear:
+
+1. Power up either the Arduino sketch or `calibrate.py` and type
+   `ARM`/`arm`.
+2. Command each joint to 90 (or whatever its intended home angle is) one
+   at a time and look at it. If it's not where you expect, that joint's
+   horn is off-angle from software's assumption - normal, not a defect.
+3. Use `LIMIT`/`limits` and `trim` (or the Arduino sketch's `LIMIT`
+   command) to record the real safe range and correction for that joint.
+4. Only after all six joints have been checked this way should you trust
+   any of the automatic sequences (color sorting, stacking, grab-and-place,
+   dance) to run unattended.
+
+## Other fixes made in this pass
+
+- **`6DOF_TESTING_AND_CALIBRATION.ino`**: `moveSmooth` took the `Servo` by
+  value instead of by reference (inconsistent with the other two sketches,
+  and fragile if the function is ever extended); command parsing silently
+  treated a servo letter with no digits after it as angle 0 (e.g. a stray
+  `A` in the input would drive that joint to 0) - it now reports the
+  problem instead of moving anywhere.
+- **`6DOF_ROBOTIC_ARM_COLOR_SORTING.ino`**: `pulseIn()` on the color
+  sensor had no timeout, so a miswired or flaky TCS3200 connection could
+  hang the sketch indefinitely mid-motion; it now times out at 25ms and
+  treats a non-response as "no reading" instead of freezing.
+- **`6DOF_STACKING.ino`**: one release step called
+  `moveArmSmooth(90, 73, 6+5, 64, 90, 40)` - `6+5` evaluates to `11`, not
+  the `65` every surrounding line uses, which would have snapped the elbow
+  to a very different angle than intended during a release step. Fixed to
+  `65`. The routine also looped forever automatically before; it now runs
+  once and requires `ARM` again to repeat, instead of an unattended
+  infinite loop.
+
+## Layout
+
+```
+arduino/
+  6DOF_TESTING_AND_CALIBRATION/6DOF_TESTING_AND_CALIBRATION.ino
+  6DOF_ROBOTIC_ARM_COLOR_SORTING/6DOF_ROBOTIC_ARM_COLOR_SORTING.ino
+  6DOF_STACKING/6DOF_STACKING.ino
+pi/
+  config.py, arm.py, calibrate.py, main.py, track.py,
+  oled.py, vision.py, buzzer.py, wake.py, debug.py, README.md
 ```
 
-(opencv/numpy you already have installed)
-
-Download a Vosk model (offline speech recognition):
-```bash
-cd ~
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-```
-Then set `VOSK_MODEL_PATH` in `config.py` to that folder's path.
-
-Download the MobileNet-SSD model for real "What's this Volt?" detection
-(optional - without it, identify falls back to the color guess automatically):
-```bash
-mkdir -p ~/models && cd ~/models
-wget https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/deploy.prototxt -O MobileNetSSD_deploy.prototxt
-wget https://github.com/chuanqi305/MobileNet-SSD/raw/master/mobilenet_iter_73000.caffemodel -O MobileNetSSD_deploy.caffemodel
-```
-Then set `SSD_PROTOTXT` / `SSD_MODEL` in `config.py` to match. Note this
-model only knows 20 general object classes (bottle, chair, cat, person,
-etc.) - it won't recognize everything, but it's real detection rather than
-a color heuristic.
-
-## Before running
-
-1. **Check `SERVO_CHANNELS` in `config.py`** - I assumed PCA9685 channels 0-5
-   map to base/shoulder/elbow/wristPitch/wristRoll/gripper in that order,
-   matching your Arduino pin order. Confirm this against your actual wiring.
-2. **Check `BUZZER_GPIO_PIN`** - set to whatever GPIO your buzzer is on.
-3. **Check mic works**: `python3 -c "import sounddevice as sd; print(sd.query_devices())"`
-   and set `AUDIO_DEVICE` in `config.py` if you've got more than one input
-   device and the default isn't the right mic.
-
-## Testing pieces individually
-
-Each module runs standalone for isolated testing:
-```bash
-python3 arm.py         # homes, then waves (now moves all joints together)
-python3 oled.py        # cycles through eye states
-python3 buzzer.py      # plays both jingles
-python3 vision.py      # 10s motion test + object identification
-python3 wake.py        # prints recognized commands, no hardware needed
-python3 calibrate.py   # interactive joint tuning - type "shoulder 94" etc.
-python3 track.py       # live face tracking with console debug line
-python3 track.py --oled  # same, plus a "tracking..." eye state on the OLED
-```
-
-Once each piece works on its own:
-```bash
-python3 main.py
-```
-
-`track.py` is a separate mode from `main.py` - it's for continuous face
-tracking (uses the camera the whole time), while `main.py` runs the
-voice-command loop where the camera is only used briefly for grab/identify.
-They're not meant to run at the same time (both want the camera).
-
-## What changed in this pass
-
-Fixed based on your friend's review:
-- **Simultaneous joint motion** - `move_pose_smooth()` now ramps all 6
-  servos together over the same duration instead of moving one joint fully
-  before the next starts. This is the one that most affects how natural
-  the arm looks.
-- **Named poses** - `config.POSES` dict + `arm.move_named("home")`, and
-  `calibrate.py`'s `save <name>` command prints a ready-to-paste POSES entry.
-- **Calibration utility** - `calibrate.py`, direct port of the interactive
-  style from `6DOF_TESTING_AND_CALIBRATION.ino` but with named joints.
-- **Live face tracking** - `track.py`, using MediaPipe face detection with
-  a simple proportional pan/tilt controller. This was your actual next
-  roadmap milestone (image detect -> live camera detect -> track).
-- **Debug screen** - `debug.py`, gives a live FPS/state status line, wired
-  into `track.py`.
-- **Real object detection** - `vision.py`'s `identify_object()` now uses
-  MobileNet-SSD when the model files are present, falling back to the
-  color guess automatically if they're not (see Install above).
-- **More OLED expressions** - added confused (used when grab finds nothing)
-  and tracking states.
-
-Not changed, on purpose:
-- Haar Cascades - never present in this codebase; that critique applied to
-  earlier standalone scripts (`face_test.py`), not this project.
-- Open-ended voice intent parsing ("grab the blue bottle") - would need a
-  full ASR + NLU pipeline instead of grammar-locked Vosk; worth doing later
-  but a separate, bigger project than this pass.
-
-## Known limitations / next steps
-
-- **Grab Volt** still uses motion detection to *trigger* a fixed
-  pick-and-place arc, not true vision-guided reaching to a specific object
-  location - that needs inverse kinematics, still on your roadmap. `track.py`
-  is a step toward this (it proves out camera->servo closed-loop control),
-  but grab and reach aren't unified yet.
-- **What's this Volt** with the SSD model only knows 20 general object
-  classes - good for bottle/chair/cat/person, not everything you might
-  hold up to it.
-- Vosk grammar recognition means VOLT is only listening for your exact
-  five phrases - it won't respond to "volt" alone as a bare wake word
-  followed by an open command. If you want true always-listening bare
-  "Volt" wake detection later, openWakeWord (already in your BMO stack)
-  is the right tool for that.
+See `pi/README.md` for the full Raspberry Pi install/setup/voice-command
+walkthrough.
