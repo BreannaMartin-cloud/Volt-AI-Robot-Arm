@@ -18,6 +18,7 @@ Joint order everywhere in the project is ``JOINT_ORDER``:
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List, Tuple
 
 # =============================================================================
@@ -64,11 +65,23 @@ SERVO_HW_MAX_DEG: int = 180
 # Calibration state
 # =============================================================================
 
-#: Flip this to True ONLY after completing the calibration procedure in
-#: docs/CALIBRATION.md (trims measured, limits verified, poses checked).
-#: While False, main.py refuses to run any motion behavior and displays
-#: "Calibration Required" - calibrate.py is the only entry point allowed
-#: to move servos.
+#: Where measured calibration is persisted (JSON, written by calibrate.py
+#: via calibration.py - never edited by hand). Everything in it overrides
+#: the factory defaults below at runtime; see calibration.apply().
+CALIBRATION_FILE_PATH: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "calibration.json"
+)
+#: The previous calibration is copied here before every overwrite.
+CALIBRATION_BACKUP_PATH: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "calibration_backup.json"
+)
+
+#: Factory default only - DO NOT edit by hand. The real value is managed
+#: by calibration.py: it flips to True in calibration.json automatically
+#: once HOME_POSE, IDLE_POSE and SAFE_SHUTDOWN_POSE have all been saved
+#: with calibrate.py's ``save`` command, and calibration.apply() loads it
+#: at runtime. While False, main.py refuses to run any motion behavior
+#: and displays "Calibration Required".
 CALIBRATED: bool = False
 
 #: Per-joint trim in degrees, added to every commanded angle at the
@@ -129,9 +142,9 @@ CAUTIOUS_ACCEL_DEG_S2: float = 50.0
 # =============================================================================
 # Poses - logical angles, keyed by joint name (never positional tuples)
 # =============================================================================
-# These are STARTING GUESSES transcribed from the previous build. Verify
-# each one against the physical robot during calibration and re-save with
-# calibrate.py's ``save`` command.
+# These are FACTORY-DEFAULT STARTING GUESSES. The measured versions live
+# in calibration.json (written by calibrate.py's ``save home`` / ``save
+# idle`` / ``save shutdown``) and override these at runtime.
 
 #: Ready-for-operation pose: claw raised well clear of the table.
 HOME_POSE: Dict[str, int] = {

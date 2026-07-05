@@ -70,9 +70,10 @@ VOLT's safety model is therefore:
 5. **Holding torque is never dropped automatically.** Only the manual
    `shutdown` command folds the arm to its resting pose, waits
    3 seconds, and declares "Safe To Power Off".
-6. **`main.py` refuses to move an uncalibrated robot.** Until you complete
-   calibration and set `CALIBRATED = True` in `config.py`, it displays
-   *"Robot Ready / Calibration Required"* and waits forever.
+6. **`main.py` refuses to move an uncalibrated robot.** Until calibration
+   is complete (all three poses saved, which flips `CALIBRATED` true in
+   `calibration.json` automatically), it displays *"Robot Ready /
+   Calibration Required"* and waits.
 
 At rest (unpowered), this robot folds at the elbow with the claw on the
 table. That's normal — and it's why `SAFE_SHUTDOWN_POSE` exists: shutdown
@@ -108,15 +109,22 @@ python3 calibrate.py
 
 - `base 92` — powers *only* the base (after a confirmation) and moves it.
 - `+2` / `-2` — nudge the last joint to fine-tune.
-- `trim elbow 5` — record that this joint's horn is 5° off; trims are
-  applied automatically to every future command. Trims beyond ±20° are
-  refused — re-seat the horn instead.
-- `limits shoulder 30 150` — record the true safe range on your frame.
-- `save home` — print a config-ready pose for pasting.
+- `trim elbow 5` — record that this joint's horn is 5° off; saved to
+  `calibration.json` immediately and applied to every future command.
+  Trims beyond ±20° are refused — re-seat the horn instead.
+- `limits shoulder 30 150` — record the true safe range on your frame
+  (also saved immediately).
+- `save home` / `save idle` / `save shutdown` — store the **current**
+  position as that pose. `save trims`, `save all` also available.
+- `show calibration` — print everything currently stored.
 - `status`, `home`, `idle`, `shutdown`, `help`, `quit`.
 
-When trims, limits, and the three poses (`HOME_POSE`, `IDLE_POSE`,
-`SAFE_SHUTDOWN_POSE`) are verified, set `CALIBRATED = True` in `config.py`.
+All measurements persist to `calibration.json` (previous version backed
+up to `calibration_backup.json` on every write) — `config.py` holds only
+factory defaults and is never edited by hand. Once all three poses are
+saved, `CALIBRATED` flips true in the file automatically and `main.py`
+unlocks — it even notices while sitting at the "Calibration Required"
+screen.
 
 ## Running
 
@@ -146,7 +154,8 @@ Say **"shutdown"** (or run `python3 shutdown.py`): the arm folds to
 ## Project structure
 
 ```
-config.py     every setting, channel, pose, threshold (single source of truth)
+config.py     every setting, channel, pose, threshold (factory defaults)
+calibration.py  persists measured trims/limits/poses to calibration.json
 utils.py      logging, state machine, shared helpers
 arm.py        low-level servo I/O — the only module that touches the PCA9685
 motion.py     profiled motion: velocity/accel limits, poses, gestures, lock

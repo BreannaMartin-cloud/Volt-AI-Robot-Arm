@@ -18,16 +18,27 @@ Commands
     <joint> <angle>     move one joint (engages it first if needed)
                         e.g.  base 92   elbow 64   wrist_pitch 104
     +N / -N             nudge the last-moved joint by N degrees (e.g. +2)
-    trim <joint> <dN>   adjust a joint's trim by dN degrees and re-apply
-    limits <joint> <lo> <hi>   set that joint's soft limits
-    save [name]         print a config.py-ready pose entry for the
-                        current position
+    trim <joint> <dN>   adjust a joint's trim by dN degrees; saved to
+                        calibration.json immediately
+    limits <joint> <lo> <hi>   set that joint's soft limits; saved to
+                        calibration.json immediately
+    save home           save the CURRENT position as HOME_POSE
+    save idle           save the CURRENT position as IDLE_POSE
+    save shutdown       save the CURRENT position as SAFE_SHUTDOWN_POSE
+    save trims          save the current trims
+    save all            save trims + limits together
+                        (once home, idle and shutdown are all saved,
+                        CALIBRATED flips to true automatically)
+    show calibration    print what calibration.json currently holds
     home                move all engaged joints to HOME_POSE (slow)
     idle                move all engaged joints to IDLE_POSE (slow)
     status              show angles / trims / limits / engagement
     shutdown            fold to SAFE_SHUTDOWN_POSE, wait, exit
     help                this text
     quit                exit WITHOUT moving (servos keep holding)
+
+Everything saves to calibration.json (with the previous version backed up
+to calibration_backup.json first) - config.py is never edited.
 """
 
 from __future__ import annotations
@@ -35,6 +46,7 @@ from __future__ import annotations
 import shlex
 from typing import Dict, List, Optional
 
+import calibration
 import config
 from arm import Arm
 from motion import MotionController
@@ -100,8 +112,10 @@ class CalibrationSession:
             print(__doc__)
         elif head == "status":
             self._status()
+        elif head == "show" and len(tokens) > 1 and tokens[1] == "calibration":
+            print("\n" + calibration.describe() + "\n")
         elif head == "save":
-            self._save(tokens[1] if len(tokens) > 1 else "new_pose")
+            self._save(tokens[1] if len(tokens) > 1 else "")
         elif head == "home":
             self._named_pose_move(config.HOME_POSE, "home")
         elif head == "idle":
@@ -200,8 +214,8 @@ class CalibrationSession:
         current = self.arm.get_angle(joint)
         if current is not None:
             self.arm.set_angle(joint, current)  # re-apply so change is visible
-        print(f"{joint} trim = {new_trim:+d} deg")
-        print(f'Paste into config.SERVO_TRIM_DEG:   "{joint}": {new_trim},')
+        calibration.save_trims()
+        print(f"{joint} trim = {new_trim:+d} deg (saved to calibration.json)")
 
     def _limits(self, args: List[str]) -> None:
         if len(args) != 3:
@@ -220,8 +234,8 @@ class CalibrationSession:
             print(f"Need {config.SERVO_HW_MIN_DEG} <= lo < hi <= {config.SERVO_HW_MAX_DEG}.")
             return
         config.SOFT_LIMITS_DEG[joint] = (lo, hi)
-        print(f"{joint} limits = ({lo}, {hi})")
-        print(f'Paste into config.SOFT_LIMITS_DEG:   "{joint}": ({lo}, {hi}),')
+        calibration.save_limits()
+        print(f"{joint} limits = ({lo}, {hi}) (saved to calibration.json)")
 
     # -- pose helpers ----------------------------------------------------------
 
@@ -236,15 +250,43 @@ class CalibrationSession:
         self.motion.move_to_pose(pose, cautious=True)
         print(f"-> {name}")
 
-    def _save(self, name: str) -> None:
+    def _save(self, target: str) -> None:
+        if target == "trims":
+            calibration.save_trims()
+            print("Trims saved to calibration.json.")
+            return
+        if target == "all":
+            calibration.save_all()
+            print("Trims and limits saved to calibration.json.")
+            print("(Poses are saved individually: save home / idle / shutdown.)")
+            return
+        if target not in calibration.POSE_KEYS:
+            print("Usage: save home | save idle | save shutdown | "
+                  "save trims | save all")
+            return
+
         pose = self.arm.get_pose()
         unknown = [j for j, a in pose.items() if a is None]
         if unknown:
-            print(f"Pose incomplete - never-engaged joints: {unknown}")
+            print(f"Can't save '{target}' - never-engaged joints: {unknown}.\n"
+                  "Move every joint at least once so the whole pose is real.")
             return
-        entries = ", ".join(f'"{j}": {int(pose[j])}' for j in config.JOINT_ORDER)
-        print(f'\n"{name}": {{{entries}}},')
-        print("^ paste into config.NAMED_POSES (or use as a *_POSE constant)\n")
+
+        was_calibrated = config.CALIBRATED
+        calibration.save_pose(target, {j: pose[j] for j in config.JOINT_ORDER})
+        section = calibration.POSE_KEYS[target]
+        print(f"Current position saved as {section} in calibration.json.")
+        if config.CALIBRATED and not was_calibrated:
+            print(
+                "\nAll three poses are saved - CALIBRATED is now TRUE.\n"
+                "main.py is unlocked. Re-run 'save <pose>' any time to refine."
+            )
+        elif not config.CALIBRATED:
+            missing = [
+                name for name, key in calibration.POSE_KEYS.items()
+                if key not in (calibration.load() or {})
+            ]
+            print(f"Still needed before CALIBRATED flips true: {missing}")
 
     def _status(self) -> None:
         print(f"\n{'joint':<12} {'angle':>6} {'engaged':>8} {'trim':>6} {'limits':>12}")
@@ -257,9 +299,12 @@ class CalibrationSession:
                 f"{config.SERVO_TRIM_DEG[joint]:>+6d} "
                 f"{str(config.SOFT_LIMITS_DEG[joint]):>12}"
             )
-        print(f"\nconfig.CALIBRATED = {config.CALIBRATED}")
-        print("When trims/limits/poses are all verified, set CALIBRATED = True "
-              "in config.py to unlock main.py.\n")
+        print(f"\nCALIBRATED = {config.CALIBRATED}")
+        if not config.CALIBRATED:
+            print("Save all three poses (save home / save idle / save shutdown)\n"
+                  "and CALIBRATED flips true automatically - no config edits.\n")
+        else:
+            print("Calibration is complete; main.py is unlocked.\n")
 
     def _shutdown(self) -> bool:
         disengaged = [j for j in config.JOINT_ORDER if not self.arm.is_engaged(j)]

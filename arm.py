@@ -30,6 +30,7 @@ import json
 import os
 from typing import Dict, Optional
 
+import calibration
 import config
 from utils import clamp, get_logger
 
@@ -54,6 +55,11 @@ class Arm:
                 "adafruit_servokit is not installed. "
                 "Run: pip3 install adafruit-circuitpython-servokit"
             )
+
+        # Overlay measured calibration (trims/limits/poses) onto config's
+        # factory defaults BEFORE validating or touching hardware, so every
+        # entry point that constructs an Arm runs with calibrated values.
+        calibration.apply()
 
         problems = config.validate()
         if problems:

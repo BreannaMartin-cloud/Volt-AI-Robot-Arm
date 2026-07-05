@@ -1,8 +1,14 @@
 # VOLT calibration guide
 
 Do this once after assembly, and again any time you re-seat a servo horn,
-swap a servo, or change the frame. Until it's done and `CALIBRATED = True`
-is set in `config.py`, `main.py` will refuse to move the robot.
+swap a servo, or change the frame. Until it's done, `main.py` will refuse
+to move the robot.
+
+Everything you measure is saved automatically to `calibration.json`
+(next to the code; the previous version is backed up to
+`calibration_backup.json` before every overwrite). `config.py` holds only
+factory defaults and is **never edited by hand** — `calibration.apply()`
+overlays your measured values at runtime.
 
 ## Why calibration is not optional
 
@@ -67,7 +73,7 @@ offset as trim:
 volt> trim base 3
 ```
 
-The tool prints the exact line to paste into `config.SERVO_TRIM_DEG`.
+Trims are saved to `calibration.json` immediately — nothing to copy.
 If a trim would exceed ±20°, the tool refuses: the horn is a full spline
 tooth off — power down and re-seat it mechanically instead.
 
@@ -81,47 +87,53 @@ unsafe), back off a few degrees, and record:
 volt> limits shoulder 30 150
 ```
 
-Paste the printed lines into `config.SOFT_LIMITS_DEG`. Pay special
+Limits are saved to `calibration.json` immediately. Pay special
 attention to:
 
 - **gripper** — its mechanical stop comes long before 0/180; driving past
   it stalls and overheats the servo.
 - **shoulder/elbow combinations** that put the claw into the table.
 
-### 4. Verify the three poses
+### 4. Save the three poses
 
 ```
-volt> home     # claw should be comfortably above the table
-volt> idle     # compact, low-torque waiting posture
+volt> home     # factory guess - adjust joints until the claw is
+volt> +2       # comfortably above the table, then:
+volt> save home
 ```
 
-Adjust joints and use `save home` / `save idle` to print corrected poses;
-paste them over `HOME_POSE` / `IDLE_POSE` in `config.py`.
+Do the same for the idle posture (`save idle` — compact, low gravity
+torque on shoulder/elbow).
 
 For `SAFE_SHUTDOWN_POSE`: position the arm so the claw is resting at (or
 a couple of degrees above) the spot it naturally falls to when unpowered,
 then `save shutdown`. The goal: when power is cut in this pose, **nothing
 falls**.
 
-### 5. Test shutdown, then flip the flag
+The moment all three poses are saved, the tool announces that
+`CALIBRATED` is now true in `calibration.json` — no config edits, ever.
+Check what's stored at any time with:
+
+```
+volt> show calibration
+```
+
+### 5. Test shutdown
 
 ```
 volt> shutdown
 ```
 
 Watch it fold. When it holds the rest pose and displays "Safe To Power
-Off", cut servo power and confirm the arm doesn't move. Then edit
-`config.py`:
-
-```python
-CALIBRATED: bool = True
-```
-
-`main.py` is now unlocked.
+Off", cut servo power and confirm the arm doesn't move. `main.py` is now
+unlocked (it re-reads `calibration.json` at startup and even while
+waiting at the "Calibration Required" screen).
 
 ## Re-calibration triggers
 
-Re-run this procedure (and reset `CALIBRATED = False` while you do) after:
+Re-run this procedure (delete `calibration.json` first if you want the
+robot locked while you work — the old file is your `calibration_backup.json`)
+after:
 
 - removing/re-seating any servo horn,
 - replacing a servo,

@@ -47,12 +47,16 @@ def _section(title: str) -> None:
 
 def check_config() -> List[str]:
     _section("Configuration")
+    import calibration
+
+    applied = calibration.apply()
     problems = config.validate()
     if problems:
         for problem in problems:
             print(f"  FAIL  {problem}")
     else:
         print("  ok    config.validate() passed")
+    print(f"  info  calibration.json {'loaded' if applied else 'not found (factory defaults)'}")
     print(f"  info  CALIBRATED = {config.CALIBRATED}")
     print(f"  info  channels   = {config.SERVO_CHANNELS}")
     print(f"  info  unused     = {config.UNUSED_CHANNELS}")

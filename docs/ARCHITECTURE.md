@@ -23,8 +23,12 @@ Rules the layering enforces:
 - **Only `motion.py` calls `arm.set_angle` in bulk.** Behaviors ask for
   poses/gestures; they never step servos directly. (`nudge_joint` is the
   single, step-bounded exception used by tracking and breathing.)
-- **`config.py` is the single source of truth.** Channels, trims, limits,
-  poses, gains, thresholds. `config.validate()` cross-checks it all.
+- **`config.py` is the single source of truth for defaults.** Channels,
+  trims, limits, poses, gains, thresholds. `config.validate()`
+  cross-checks it all. Measured calibration lives in `calibration.json`
+  and is overlaid onto config at runtime by `calibration.apply()`
+  (called by `Arm.__init__`, `main.py`, and `debug.py`) — config.py is
+  never hand-edited during calibration.
 
 ## Safety invariants
 
@@ -32,7 +36,7 @@ Rules the layering enforces:
 |---|---|
 | No pulse at startup | `Arm.__init__` never writes an angle |
 | No motion without consent | `engage_joint` required per joint; REPL/CLI confirmations |
-| No motion when uncalibrated | `main.py` gates on `config.CALIBRATED` |
+| No motion when uncalibrated | `main.py` gates on `CALIBRATED` in `calibration.json` (via `calibration.apply()`) |
 | Every angle clamped | single write point `Arm._write` |
 | Every trim bounded | `MAX_SAFE_TRIM_DEG`, checked in `validate()` and `calibrate.py` |
 | No instantaneous jumps | trapezoidal profile in `MotionController` |

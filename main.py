@@ -6,9 +6,10 @@ Startup sequence (no servo receives a pulse until you explicitly allow it):
 
 1. BOOTING - verify config, PCA9685, OLED, camera, microphone; print a
    status report.
-2. If ``config.CALIBRATED`` is False: display "Robot Ready /
-   Calibration Required" and wait indefinitely. Motion is refused until
-   calibration is completed and the flag is set.
+2. If calibration.json is missing or incomplete (CALIBRATED false):
+   display "Robot Ready / Calibration Required" and wait. Motion is
+   refused until calibrate.py has saved all three poses, which flips
+   CALIBRATED true in calibration.json automatically.
 3. If calibrated: wait for the operator to confirm servo engagement
    (the one open-loop move), then enter the voice-command loop:
 
@@ -25,6 +26,7 @@ import threading
 import time
 from typing import Optional
 
+import calibration
 import config
 from arm import Arm
 from buzzer import create_buzzer
@@ -35,6 +37,9 @@ from utils import RobotState, StateMachine, get_logger
 from voice import Command, VoiceController
 
 log = get_logger("main")
+
+#: How often the READY hold re-checks calibration.json for completion.
+_CALIBRATION_RECHECK_S = 5.0
 
 
 class VoltRobot:
@@ -99,20 +104,31 @@ class VoltRobot:
         return ok
 
     def require_calibration_or_wait(self) -> None:
-        """Hold at READY forever if the robot has never been calibrated."""
+        """Hold at READY until calibration.json exists with CALIBRATED true.
+
+        Re-checks the file periodically, so finishing calibrate.py in
+        another terminal unlocks the robot without a restart. Commands no
+        motion while waiting.
+        """
+        calibration.apply()
         if config.CALIBRATED:
             return
         self.states.transition(RobotState.READY)
         self.eyes.text("Robot Ready", "Calibration Required")
         print(
             "Robot Ready - Calibration Required\n\n"
-            "This robot has not been calibrated (config.CALIBRATED is False),\n"
-            "so main.py will not move it. Run:  python3 calibrate.py\n"
-            "then set CALIBRATED = True in config.py once trims, limits and\n"
-            "poses are verified. Waiting (Ctrl+C to exit)..."
+            f"No completed calibration at {config.CALIBRATION_FILE_PATH}.\n"
+            "Run:  python3 calibrate.py\n"
+            "and save all three poses (save home / save idle / save shutdown);\n"
+            "CALIBRATED flips true automatically. Gestures and tracking stay\n"
+            "locked until then. Waiting (Ctrl+C to exit)..."
         )
         while True:  # wait indefinitely, commanding nothing
-            time.sleep(3600)
+            time.sleep(_CALIBRATION_RECHECK_S)
+            calibration.apply()
+            if config.CALIBRATED:
+                print("Calibration detected - continuing startup.")
+                return
 
     def engage_with_consent(self) -> None:
         """The one open-loop move, gated behind an explicit human 'yes'."""

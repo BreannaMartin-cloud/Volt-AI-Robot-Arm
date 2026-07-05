@@ -5,5 +5,7 @@ __pycache__/
 venv/
 *.egg-info/
 .volt_arm_state.json
+calibration.json
+calibration_backup.json
 *.log
 .DS_Store
