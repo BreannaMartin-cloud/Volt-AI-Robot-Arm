@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.volt_arm_state.json
+*.log
+.DS_Store
