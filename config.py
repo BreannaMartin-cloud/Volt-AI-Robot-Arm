@@ -273,8 +273,29 @@ BUZZER_GPIO_PIN: int = 18  # BCM numbering, PWM-capable
 # =============================================================================
 
 CAMERA_INDEX: int = 0
-FRAME_WIDTH: int = 640
-FRAME_HEIGHT: int = 480
+
+#: Preferred capture mode. If the camera cannot sustain CAMERA_FPS at
+#: this resolution (or refuses the resolution outright), vision.py
+#: automatically falls back to CAMERA_FALLBACK_* and logs why.
+CAMERA_WIDTH: int = 1280
+CAMERA_HEIGHT: int = 720
+CAMERA_FPS: int = 30
+CAMERA_FALLBACK_WIDTH: int = 640
+CAMERA_FALLBACK_HEIGHT: int = 480
+#: Measured FPS below this triggers the fallback (a little slack under
+#: CAMERA_FPS so normal jitter doesn't demote a healthy camera).
+CAMERA_MIN_SUSTAINED_FPS: float = 24.0
+
+#: Physical mounting correction. The CSI camera on this robot is mounted
+#: UPSIDE DOWN above the wrist (the ribbon cable has to exit toward the
+#: arm to reach the Pi), so every raw frame arrives rotated 180 degrees.
+#: vision.py applies this correction at its single frame-read point -
+#: change ONLY these values if the camera is ever remounted; no code
+#: edits are needed anywhere else. Valid rotations: 0, 90, 180, 270.
+CAMERA_ROTATION: int = 180
+CAMERA_FLIP_HORIZONTAL: bool = False
+CAMERA_FLIP_VERTICAL: bool = False
+
 FACE_DETECTION_CONFIDENCE: float = 0.6
 
 #: Motion-detection trigger used by "grab object".
@@ -403,5 +424,10 @@ def validate() -> List[str]:
     for track_joint in (TRACK_PAN_JOINT, TRACK_TILT_JOINT):
         if track_joint not in SERVO_CHANNELS:
             problems.append(f"tracking joint '{track_joint}' is not a known joint")
+
+    if CAMERA_ROTATION not in (0, 90, 180, 270):
+        problems.append(
+            f"CAMERA_ROTATION is {CAMERA_ROTATION}; must be 0, 90, 180 or 270"
+        )
 
     return problems

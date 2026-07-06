@@ -63,17 +63,40 @@ class FaceObservation:
         )
 
 
+#: Frames sampled when measuring whether the camera sustains its target FPS.
+_FPS_PROBE_FRAMES = 15
+
+
 class Vision:
-    """Camera owner. Construct once; call :meth:`release` when done."""
+    """Camera owner. Construct once; call :meth:`release` when done.
+
+    Opens the camera at the preferred resolution (``CAMERA_WIDTH`` x
+    ``CAMERA_HEIGHT`` @ ``CAMERA_FPS``); if the camera refuses that mode
+    or cannot sustain ``CAMERA_MIN_SUSTAINED_FPS`` there, it automatically
+    falls back to ``CAMERA_FALLBACK_WIDTH`` x ``CAMERA_FALLBACK_HEIGHT``
+    and logs the reason. The active mode is logged at startup and exposed
+    via :attr:`active_width` / :attr:`active_height` / :attr:`active_fps`.
+    """
 
     def __init__(self) -> None:
         if cv2 is None:
             raise RuntimeError("opencv-python is not installed")
         self._capture = cv2.VideoCapture(config.CAMERA_INDEX)
-        self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
-        self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
         if not self._capture.isOpened():
             raise RuntimeError(f"camera index {config.CAMERA_INDEX} did not open")
+
+        # cv2.rotate codes for the four supported orientations. Built here
+        # (not module level) because cv2 may be absent on dev machines.
+        self._rotate_code = {
+            0: None,
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }[config.CAMERA_ROTATION]
+
+        self.active_width, self.active_height, self.active_fps = (
+            self._negotiate_resolution()
+        )
 
         self._face_detector = None
         if mp is not None:
@@ -83,15 +106,102 @@ class Vision:
             )
         else:
             log.warning("mediapipe not installed; face detection disabled")
-        log.info("camera %d open at %dx%d", config.CAMERA_INDEX,
-                 config.FRAME_WIDTH, config.FRAME_HEIGHT)
+
+        log.info(
+            "camera %d active at %dx%d @ %.1f FPS "
+            "(rotation %d deg, hflip=%s, vflip=%s)",
+            config.CAMERA_INDEX, self.active_width, self.active_height,
+            self.active_fps, config.CAMERA_ROTATION,
+            config.CAMERA_FLIP_HORIZONTAL, config.CAMERA_FLIP_VERTICAL,
+        )
 
     # ------------------------------------------------------------------
+    # Capture mode negotiation
+    # ------------------------------------------------------------------
+
+    def _try_mode(self, width: int, height: int) -> tuple:
+        """Apply a capture mode and measure what the camera really does.
+
+        Returns (actual_width, actual_height, measured_fps). Cameras
+        routinely accept property sets and then silently deliver a
+        different mode, so both the size and the rate are verified from
+        real frames, never from the properties.
+        """
+        self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self._capture.set(cv2.CAP_PROP_FPS, config.CAMERA_FPS)
+        self._capture.read()  # let the driver settle into the new mode
+
+        start = time.monotonic()
+        captured = 0
+        actual_w, actual_h = 0, 0
+        for _ in range(_FPS_PROBE_FRAMES):
+            ok, frame = self._capture.read()
+            if ok:
+                captured += 1
+                actual_h, actual_w = frame.shape[:2]
+        elapsed = time.monotonic() - start
+        fps = captured / elapsed if elapsed > 0 else 0.0
+        return actual_w, actual_h, fps
+
+    def _negotiate_resolution(self) -> tuple:
+        """Preferred mode first; fall back (with the reason logged) if the
+        camera can't deliver it at a usable rate."""
+        width, height, fps = self._try_mode(config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
+
+        reason = None
+        if (width, height) != (config.CAMERA_WIDTH, config.CAMERA_HEIGHT):
+            reason = (
+                f"camera delivered {width}x{height} instead of "
+                f"{config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT}"
+            )
+        elif fps < config.CAMERA_MIN_SUSTAINED_FPS:
+            reason = (
+                f"only {fps:.1f} FPS sustained at "
+                f"{config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT} "
+                f"(need >= {config.CAMERA_MIN_SUSTAINED_FPS:.0f})"
+            )
+        if reason is None:
+            return width, height, fps
+
+        log.warning(
+            "falling back to %dx%d: %s",
+            config.CAMERA_FALLBACK_WIDTH, config.CAMERA_FALLBACK_HEIGHT, reason,
+        )
+        width, height, fps = self._try_mode(
+            config.CAMERA_FALLBACK_WIDTH, config.CAMERA_FALLBACK_HEIGHT
+        )
+        return width, height, fps
+
+    # ------------------------------------------------------------------
+    # Frame acquisition - THE single orientation point
+    # ------------------------------------------------------------------
+
+    def _orient(self, frame: "np.ndarray") -> "np.ndarray":
+        """Correct the raw frame for how the camera is physically mounted.
+
+        On this robot the CSI camera sits above the wrist UPSIDE DOWN
+        (the ribbon cable must exit toward the arm to reach the Pi), so
+        raw frames arrive rotated 180 degrees. The correction is set in
+        config (CAMERA_ROTATION / CAMERA_FLIP_*) and applied here ONLY -
+        every consumer (face detection, motion, color, future YOLO,
+        captures, debug views) reads through read_frame(), so nothing
+        downstream ever sees an unoriented frame or needs its own fixups.
+        """
+        if self._rotate_code is not None:
+            frame = cv2.rotate(frame, self._rotate_code)
+        if config.CAMERA_FLIP_HORIZONTAL:
+            frame = cv2.flip(frame, 1)
+        if config.CAMERA_FLIP_VERTICAL:
+            frame = cv2.flip(frame, 0)
+        return frame
 
     def read_frame(self) -> Optional["np.ndarray"]:
-        """One BGR frame, or None on a failed read."""
+        """One orientation-corrected BGR frame, or None on a failed read."""
         ok, frame = self._capture.read()
-        return frame if ok else None
+        if not ok:
+            return None
+        return self._orient(frame)
 
     def detect_face(self) -> Optional[FaceObservation]:
         """Detect the most confident face in a fresh frame."""
@@ -182,7 +292,9 @@ class Vision:
 
 if __name__ == "__main__":
     vision = Vision()
-    print(f"FPS: {vision.measure_fps():.1f}")
+    print(f"Active mode: {vision.active_width}x{vision.active_height} "
+          f"@ {vision.active_fps:.1f} FPS")
+    print(f"Pipeline FPS (with orientation): {vision.measure_fps():.1f}")
     print("Watching for motion (10s)...")
     print("Motion!" if vision.wait_for_motion(10) else "No motion.")
     print(f"Center color: {vision.guess_center_color()}")

@@ -126,6 +126,31 @@ saved, `CALIBRATED` flips true in the file automatically and `main.py`
 unlocks — it even notices while sitting at the "Calibration Required"
 screen.
 
+## Camera orientation & resolution (config only — never code)
+
+The CSI camera on this robot is physically mounted **upside down** above
+the wrist, so frames need a 180° correction. That correction — and any
+future remount — is handled entirely in `config.py`:
+
+```python
+CAMERA_ROTATION = 180        # 0, 90, 180 or 270
+CAMERA_FLIP_HORIZONTAL = False
+CAMERA_FLIP_VERTICAL = False
+```
+
+Change `CAMERA_ROTATION` and the **entire project** follows automatically:
+face detection, tracking, motion/color detection, future YOLO, captures,
+and debug views all read frames through the one orientation point in
+`vision.py` (`Vision._orient`, applied inside `read_frame()`). No other
+file contains a rotation or flip, so no other file ever needs editing.
+
+Resolution works the same way: the camera opens at `CAMERA_WIDTH` ×
+`CAMERA_HEIGHT` (default **1280×720 @ 30 FPS**), and if it can't deliver
+that mode or can't sustain `CAMERA_MIN_SUSTAINED_FPS` there, it falls
+back to `CAMERA_FALLBACK_WIDTH` × `CAMERA_FALLBACK_HEIGHT` (640×480)
+and logs the reason. The active mode prints during `main.py` startup and
+in `python3 debug.py`.
+
 ## Running
 
 ```bash

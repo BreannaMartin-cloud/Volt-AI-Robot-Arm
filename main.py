@@ -89,8 +89,10 @@ class VoltRobot:
             from vision import Vision
 
             probe = Vision()
+            print(f"  ok    camera ({probe.active_width}x{probe.active_height} "
+                  f"@ {probe.active_fps:.1f} FPS, "
+                  f"rotation {config.CAMERA_ROTATION} deg)")
             probe.release()
-            print("  ok    camera")
         except Exception as exc:  # noqa: BLE001
             print(f"  warn  camera: {exc}")
 

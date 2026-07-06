@@ -124,9 +124,17 @@ def check_camera() -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"  FAIL  camera: {exc}")
         return
-    fps = vision.measure_fps()
-    print(f"  ok    camera {config.CAMERA_INDEX} at "
-          f"{config.FRAME_WIDTH}x{config.FRAME_HEIGHT}, {fps:.1f} FPS")
+    fallback = (vision.active_width, vision.active_height) != (
+        config.CAMERA_WIDTH, config.CAMERA_HEIGHT
+    )
+    print(f"  Device: {config.CAMERA_INDEX}")
+    print(f"  Resolution: {vision.active_width}x{vision.active_height}"
+          + (f"  (fell back from {config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT})"
+             if fallback else ""))
+    print(f"  FPS: {vision.active_fps:.1f}  (target {config.CAMERA_FPS})")
+    print(f"  Rotation: {config.CAMERA_ROTATION}\N{DEGREE SIGN}")
+    print(f"  Horizontal Flip: {config.CAMERA_FLIP_HORIZONTAL}")
+    print(f"  Vertical Flip: {config.CAMERA_FLIP_VERTICAL}")
     face = vision.detect_face()
     print(f"  info  face detection: {'face seen' if face else 'no face in view'}")
     vision.release()
