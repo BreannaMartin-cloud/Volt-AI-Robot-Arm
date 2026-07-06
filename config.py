@@ -241,8 +241,17 @@ IDLE_BREATHING_JOINT: str = "wrist_roll"
 IDLE_BREATHING_AMPLITUDE_DEG: int = 3
 IDLE_BREATHING_PERIOD_S: float = 4.0
 
-#: Seconds between idle blinks on the OLED.
-IDLE_BLINK_INTERVAL_S: float = 4.0
+#: OLED idle personality (values borrowed from a very cute robot-dog
+#: firmware): blinks land at a random interval in this range...
+OLED_IDLE_BLINK_MIN_S: float = 3.0
+OLED_IDLE_BLINK_MAX_S: float = 7.0
+#: ...and this fraction of blinks are followed by a quick second blink,
+#: which is what makes the idle read as alive instead of metronomic.
+OLED_DOUBLE_BLINK_CHANCE: float = 0.3
+OLED_DOUBLE_BLINK_GAP_MIN_S: float = 0.12
+OLED_DOUBLE_BLINK_GAP_MAX_S: float = 0.22
+#: Chance an idle event is a sideways glance instead of a blink.
+OLED_IDLE_GLANCE_CHANCE: float = 0.2
 
 # =============================================================================
 # OLED (0.96" SSD1306, I2C)
