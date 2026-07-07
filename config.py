@@ -198,6 +198,21 @@ NAMED_POSES: Dict[str, Dict[str, int]] = {
 # Gesture sequences - lists of poses played through motion.py's profiler
 # =============================================================================
 
+#: Tighter-than-soft-limit bounds that every GESTURE pose must respect,
+#: measured on this robot: gestures keep the shoulder >= 125 (so the arm
+#: can never fold backward into the table mid-emote), the elbow raised,
+#: and base/wrist excursions modest. config.validate() checks every pose
+#: in every sequence below against this table at boot - an out-of-range
+#: gesture pose is a startup error, not a surprise on the hardware.
+GESTURE_LIMITS_DEG: Dict[str, Tuple[int, int]] = {
+    "base": (70, 110),
+    "shoulder": (125, 160),
+    "elbow": (70, 125),
+    "wrist_pitch": (20, 60),
+    "wrist_roll": (10, 40),
+    "gripper": (35, 75),  # present in poses but never commanded by emotes
+}
+
 WAVE_SEQUENCE = [
     {"base": 90, "shoulder": 150, "elbow": 100, "wrist_pitch": 30, "wrist_roll": 10, "gripper": 50},
     {"base": 90, "shoulder": 150, "elbow": 100, "wrist_pitch": 30, "wrist_roll": 35, "gripper": 50},
@@ -361,7 +376,9 @@ VOICE_COMMANDS: Dict[str, str] = {
     "follow face": "track",
     "open claw": "open_claw",
     "close claw": "close_claw",
+    "grab": "grab",
     "grab object": "grab",
+    "release": "release",
     "release object": "release",
     "go idle": "idle",
     "sleep": "sleep",
@@ -438,5 +455,19 @@ def validate() -> List[str]:
         problems.append(
             f"CAMERA_ROTATION is {CAMERA_ROTATION}; must be 0, 90, 180 or 270"
         )
+
+    for seq_name, sequence in (
+        ("WAVE_SEQUENCE", WAVE_SEQUENCE),
+        ("DANCE_SEQUENCE", DANCE_SEQUENCE),
+        ("SHIMMY_SEQUENCE", SHIMMY_SEQUENCE),
+    ):
+        for step, pose in enumerate(sequence):
+            for joint, angle in pose.items():
+                lo, hi = GESTURE_LIMITS_DEG.get(joint, (SERVO_HW_MIN_DEG, SERVO_HW_MAX_DEG))
+                if not lo <= angle <= hi:
+                    problems.append(
+                        f"{seq_name} step {step} sets {joint}={angle}, "
+                        f"outside gesture limits ({lo}, {hi})"
+                    )
 
     return problems
