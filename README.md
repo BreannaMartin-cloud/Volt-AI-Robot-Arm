@@ -2,7 +2,7 @@
 
 VOLT is a Yahboom 6DOF robot arm rebuilt as an interactive desktop robot:
 voice-controlled, face-tracking, with OLED eyes, a buzzer voice, and a
-safety-first motion stack — all running directly on a Raspberry Pi 5
+safety-first motion stack — all running directly on a Raspberry Pi 4
 (no Arduino).
 
 ```
@@ -14,7 +14,7 @@ safety-first motion stack — all running directly on a Raspberry Pi 5
 | Part | Interface | Notes |
 |---|---|---|
 | Yahboom 6DOF arm | — | 6 hobby servos, open-loop |
-| Raspberry Pi 5 | — | runs everything |
+| Raspberry Pi 4 | — | runs everything |
 | PCA9685 servo driver | I2C `0x40` | 16-channel PWM |
 | CSI camera | CSI | face detection/tracking, motion trigger |
 | 0.96" SSD1306 OLED | I2C `0x3C` | VOLT's eyes |

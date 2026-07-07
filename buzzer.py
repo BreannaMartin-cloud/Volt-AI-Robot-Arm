@@ -5,10 +5,10 @@ Like the OLED, the buzzer degrades gracefully: :func:`create_buzzer`
 returns a :class:`NullBuzzer` when GPIO is unavailable so the robot never
 crashes over a missing beep.
 
-Backend note: RPi.GPIO does NOT work on the Raspberry Pi 5 (new RP1 GPIO
-block), so gpiozero (which drives the Pi 5 via lgpio and ships with
-Raspberry Pi OS) is tried first; RPi.GPIO remains as the fallback for
-older Pis without gpiozero.
+Backend note: gpiozero (which ships with Raspberry Pi OS) is tried first,
+with RPi.GPIO as the fallback. Both work on the Pi 4 this robot runs on;
+gpiozero-first also future-proofs the buzzer for a Pi 5, where RPi.GPIO
+does not work at all (new RP1 GPIO block).
 """
 
 from __future__ import annotations
