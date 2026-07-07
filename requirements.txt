@@ -3,14 +3,18 @@
 # Install with:
 #   pip3 install -r requirements.txt --break-system-packages
 #
-# opencv and numpy are often faster to install from apt on a Pi:
-#   sudo apt install python3-opencv python3-numpy
+# opencv, numpy, and picamera2 MUST come from apt on a Pi (Picamera2 is
+# apt-only, and a pip opencv alongside apt's python3-opencv is exactly the
+# "two versions of cv2" conflict that broke the camera before):
+#   sudo apt install python3-opencv python3-numpy python3-picamera2
+#
+# Do NOT pip install opencv-python or numpy on the Pi. mediapipe is also
+# left out on purpose - pip mediapipe drags in its own opencv wheel and
+# recreates the same conflict; vision.py falls back to OpenCV's Haar
+# face detector automatically when mediapipe is absent.
 
 adafruit-circuitpython-servokit>=1.3
 luma.oled>=3.12
 RPi.GPIO>=0.7
-opencv-python>=4.8
-numpy>=1.24
-mediapipe>=0.10
 vosk>=0.3.45
 sounddevice>=0.4

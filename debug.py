@@ -127,6 +127,7 @@ def check_camera() -> None:
     fallback = (vision.active_width, vision.active_height) != (
         config.CAMERA_WIDTH, config.CAMERA_HEIGHT
     )
+    print(f"  Backend: {getattr(vision, 'backend', 'unknown')}")
     print(f"  Device: {config.CAMERA_INDEX}")
     print(f"  Resolution: {vision.active_width}x{vision.active_height}"
           + (f"  (fell back from {config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT})"
