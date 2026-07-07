@@ -382,6 +382,16 @@ class VoltRobot:
                 "'shutdown' voice command or python3 shutdown.py before "
                 "powering off."
             )
+        except Exception as exc:  # noqa: BLE001 - fail soft, never drop the arm
+            self.states.transition(RobotState.ERROR)
+            self.eyes.sad()
+            log.error("voice loop failed: %s", exc)
+            print(
+                f"\nVoice loop failed: {exc}\n"
+                "Servos keep holding position - the arm has NOT been released.\n"
+                "Fix the issue (python3 debug.py checks every subsystem), then\n"
+                "rerun main.py, or run python3 shutdown.py to fold and power off."
+            )
         finally:
             self._stop_breathing()
             self.eyes.stop_idle()

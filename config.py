@@ -327,7 +327,15 @@ TRACK_TILT_LIMITS_DEG: Tuple[int, int] = (50, 130)
 # =============================================================================
 
 VOSK_MODEL_PATH: str = "/home/bre/vosk-model-small-en-us-0.15"
+#: Preferred capture rate (Vosk's native rate). Many USB microphones only
+#: capture at 44100/48000 Hz and will refuse 16000 outright - wake.py
+#: probes this rate first, then the device's own default, then the
+#: fallbacks below, and tells Vosk the rate actually in use (Vosk
+#: resamples internally, so recognition works at any of these).
 AUDIO_SAMPLE_RATE: int = 16000
+AUDIO_FALLBACK_SAMPLE_RATES: Tuple[int, ...] = (48000, 44100, 32000, 22050, 8000)
+#: Block size at AUDIO_SAMPLE_RATE (~0.5 s); scaled proportionally when a
+#: fallback rate is used so latency stays constant.
 AUDIO_BLOCK_SIZE: int = 8000
 AUDIO_CHANNELS: int = 1  # mono microphone
 AUDIO_DEVICE: int | None = None  # None = system default input
