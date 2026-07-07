@@ -4,6 +4,11 @@ Short original jingles and UI feedback tones, played over software PWM.
 Like the OLED, the buzzer degrades gracefully: :func:`create_buzzer`
 returns a :class:`NullBuzzer` when GPIO is unavailable so the robot never
 crashes over a missing beep.
+
+Backend note: RPi.GPIO does NOT work on the Raspberry Pi 5 (new RP1 GPIO
+block), so gpiozero (which drives the Pi 5 via lgpio and ships with
+Raspberry Pi OS) is tried first; RPi.GPIO remains as the fallback for
+older Pis without gpiozero.
 """
 
 from __future__ import annotations
@@ -13,6 +18,11 @@ from typing import Dict, List, Tuple
 
 import config
 from utils import get_logger
+
+try:
+    from gpiozero import PWMOutputDevice
+except ImportError:  # pragma: no cover
+    PWMOutputDevice = None
 
 try:
     import RPi.GPIO as GPIO
@@ -51,17 +61,80 @@ _PWM_DUTY_CYCLE = 50  # square wave for a passive buzzer
 _PWM_INITIAL_HZ = 440
 
 
-class Buzzer:
-    """Passive buzzer on ``config.BUZZER_GPIO_PIN`` via software PWM."""
+class _GpiozeroTone:
+    """PWM tone backend for Pi 5 (and any Pi with gpiozero/lgpio)."""
+
+    name = "gpiozero"
 
     def __init__(self) -> None:
-        if GPIO is None:
-            raise RuntimeError("RPi.GPIO is not installed. Run: pip3 install RPi.GPIO")
+        self._pwm = PWMOutputDevice(
+            config.BUZZER_GPIO_PIN, frequency=_PWM_INITIAL_HZ, initial_value=0
+        )
+
+    def tone(self, freq: int) -> None:
+        self._pwm.frequency = freq
+        self._pwm.value = _PWM_DUTY_CYCLE / 100
+
+    def silence(self) -> None:
+        self._pwm.value = 0
+
+    def cleanup(self) -> None:
+        self._pwm.off()
+        self._pwm.close()
+
+
+class _RPiGPIOTone:
+    """Legacy software-PWM backend (does not work on Raspberry Pi 5)."""
+
+    name = "RPi.GPIO"
+
+    def __init__(self) -> None:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(config.BUZZER_GPIO_PIN, GPIO.OUT)
         self._pwm = GPIO.PWM(config.BUZZER_GPIO_PIN, _PWM_INITIAL_HZ)
         self._active = False
-        log.info("buzzer attached on GPIO %d", config.BUZZER_GPIO_PIN)
+
+    def tone(self, freq: int) -> None:
+        if not self._active:
+            self._pwm.start(_PWM_DUTY_CYCLE)
+            self._active = True
+        self._pwm.ChangeFrequency(freq)
+
+    def silence(self) -> None:
+        if self._active:
+            self._pwm.stop()
+            self._active = False
+
+    def cleanup(self) -> None:
+        self.silence()
+        GPIO.cleanup(config.BUZZER_GPIO_PIN)
+
+
+class Buzzer:
+    """Passive buzzer on ``config.BUZZER_GPIO_PIN`` via software PWM."""
+
+    def __init__(self) -> None:
+        self._backend = None
+        errors = []
+        if PWMOutputDevice is not None:
+            try:
+                self._backend = _GpiozeroTone()
+            except Exception as exc:  # noqa: BLE001 - try the next backend
+                errors.append(f"gpiozero: {exc}")
+        if self._backend is None and GPIO is not None:
+            try:
+                self._backend = _RPiGPIOTone()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"RPi.GPIO: {exc}")
+        if self._backend is None:
+            raise RuntimeError(
+                "no working GPIO backend for the buzzer "
+                f"({'; '.join(errors) or 'gpiozero/RPi.GPIO not installed'})"
+            )
+        log.info(
+            "buzzer attached on GPIO %d via %s",
+            config.BUZZER_GPIO_PIN, self._backend.name,
+        )
 
     def play_song(self, song: Song) -> None:
         try:
@@ -76,16 +149,11 @@ class Buzzer:
             self._silence()
             time.sleep(duration)
             return
-        if not self._active:
-            self._pwm.start(_PWM_DUTY_CYCLE)
-            self._active = True
-        self._pwm.ChangeFrequency(freq)
+        self._backend.tone(freq)
         time.sleep(duration)
 
     def _silence(self) -> None:
-        if self._active:
-            self._pwm.stop()
-            self._active = False
+        self._backend.silence()
 
     # -- named cues --------------------------------------------------------
 
@@ -108,8 +176,7 @@ class Buzzer:
         self.play_song(SHIMMY_SONG)
 
     def cleanup(self) -> None:
-        self._silence()
-        GPIO.cleanup(config.BUZZER_GPIO_PIN)
+        self._backend.cleanup()
 
 
 class NullBuzzer:

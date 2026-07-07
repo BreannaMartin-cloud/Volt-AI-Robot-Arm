@@ -2,7 +2,7 @@
 
 VOLT is a Yahboom 6DOF robot arm rebuilt as an interactive desktop robot:
 voice-controlled, face-tracking, with OLED eyes, a buzzer voice, and a
-safety-first motion stack — all running directly on a Raspberry Pi 4
+safety-first motion stack — all running directly on a Raspberry Pi 5
 (no Arduino).
 
 ```
@@ -14,7 +14,7 @@ safety-first motion stack — all running directly on a Raspberry Pi 4
 | Part | Interface | Notes |
 |---|---|---|
 | Yahboom 6DOF arm | — | 6 hobby servos, open-loop |
-| Raspberry Pi 4 | — | runs everything |
+| Raspberry Pi 5 | — | runs everything |
 | PCA9685 servo driver | I2C `0x40` | 16-channel PWM |
 | CSI camera | CSI | face detection/tracking, motion trigger |
 | 0.96" SSD1306 OLED | I2C `0x3C` | VOLT's eyes |
@@ -91,6 +91,17 @@ cd ~
 wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
 unzip vosk-model-small-en-us-0.15.zip
 # then point config.VOSK_MODEL_PATH at that folder
+```
+
+Optional, better face tracking (MediaPipe — vision.py prefers it and falls
+back to the Haar cascade without it). pip's mediapipe drags in its own
+opencv wheel, which is exactly the "two versions of cv2" conflict that
+broke the camera once already — so install it, then remove the pip opencv
+it brought along so apt's `python3-opencv` stays in charge:
+
+```bash
+pip3 install mediapipe --break-system-packages
+pip3 uninstall -y opencv-contrib-python opencv-python
 ```
 
 Verify everything (moves nothing):

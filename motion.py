@@ -87,13 +87,11 @@ class MotionController:
             self.arm.save_state()
 
     def move_joint(self, joint: str, angle: float, cautious: bool = False) -> None:
-        """Profiled move of a single joint; no other joint moves."""
+        """Profiled move of a single joint; no other joint is written."""
         current = self.arm.get_angle(joint)
         if current is None:
             raise RuntimeError(f"joint '{joint}' is not engaged")
-        pose = {j: a for j, a in self.arm.get_pose().items() if a is not None}
-        pose[joint] = angle
-        self.move_to_pose(pose, cautious=cautious)
+        self.move_to_pose({joint: angle}, cautious=cautious)
 
     def nudge_joint(self, joint: str, delta: float) -> float:
         """Small direct step, used by tracking and breathing.
@@ -183,15 +181,27 @@ class MotionController:
     # Named poses and gestures
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _arm_only(pose: Dict[str, float]) -> Dict[str, float]:
+        """A pose with the gripper left out.
+
+        Home/idle returns must never change the grip: the post-command
+        return-to-idle used to command the gripper back to its pose value,
+        prying the jaws half-open around a just-grabbed object. Gripper
+        state changes ONLY via open/close/grab/release.
+        """
+        return {j: a for j, a in pose.items() if j != "gripper"}
+
     def go_home(self, cautious: bool = False) -> None:
-        self.move_to_pose(config.HOME_POSE, cautious=cautious)
+        self.move_to_pose(self._arm_only(config.HOME_POSE), cautious=cautious)
 
     def go_idle(self, cautious: bool = False) -> None:
-        self.move_to_pose(config.IDLE_POSE, cautious=cautious)
+        self.move_to_pose(self._arm_only(config.IDLE_POSE), cautious=cautious)
 
     def go_safe_shutdown(self) -> None:
-        """Fold to the shutdown pose, always cautiously."""
-        self.move_to_pose(config.SAFE_SHUTDOWN_POSE, cautious=True)
+        """Fold to the shutdown pose, always cautiously (gripper untouched,
+        in case it is holding something when shutdown is called)."""
+        self.move_to_pose(self._arm_only(config.SAFE_SHUTDOWN_POSE), cautious=True)
 
     def open_gripper(self) -> None:
         self.move_joint("gripper", config.GRIPPER_OPEN_DEG)
@@ -204,11 +214,15 @@ class MotionController:
         sequence: Iterable[Dict[str, float]],
         pause_between_s: float = 0.2,
     ) -> None:
-        """Play a list of poses through the profiler, stoppable between steps."""
+        """Play a list of poses through the profiler, stoppable between steps.
+
+        Gripper values in sequence poses are ignored (same policy as
+        go_home/go_idle): an emote must never loosen a held object.
+        """
         for pose in sequence:
             if self._stop_event.is_set():
                 return
-            self.move_to_pose(pose)
+            self.move_to_pose(self._arm_only(pose), cautious=True)
             time.sleep(pause_between_s)
 
     def wave(self) -> None:
@@ -224,12 +238,20 @@ class MotionController:
         self.go_idle()
 
     def grab(self) -> None:
-        self.run_sequence(config.GRAB_SEQUENCE, pause_between_s=0.4)
-        self.go_idle()
+        """Gripper-only grab: open, pause, close. Done.
+
+        Deliberately NO arm motion and NO vision - the arm holds whatever
+        pose it is in and only the jaws move, so the mechanics can be
+        verified in isolation. Vision-guided pick-and-place (find object,
+        move above, lower, close, lift) comes later, on top of this.
+        """
+        self.open_gripper()
+        time.sleep(config.GRAB_OPEN_PAUSE_S)
+        self.close_gripper()
 
     def release(self) -> None:
-        self.run_sequence(config.RELEASE_SEQUENCE, pause_between_s=0.4)
-        self.go_idle()
+        """Gripper-only release: open. Done. (See grab() for why.)"""
+        self.open_gripper()
 
     # ------------------------------------------------------------------
     # Idle breathing animation

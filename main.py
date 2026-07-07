@@ -280,23 +280,13 @@ class VoltRobot:
             vision.release()
 
     def _do_grab(self) -> None:
+        """Gripper-only for now: open, pause, close - no arm motion, no
+        vision. Verifies the claw mechanics before vision-guided
+        pick-and-place is layered on later."""
         assert self.motion is not None
-        from vision import Vision
-
         self.eyes.thinking()
-        vision = Vision()
-        try:
-            self.states.transition(RobotState.SEARCHING)
-            if vision.wait_for_motion(timeout_s=8.0):
-                self.states.transition(RobotState.GRABBING)
-                self.motion.grab()
-                self.eyes.happy()
-            else:
-                self.eyes.confused()
-                self.buzzer.error()
-                time.sleep(1.0)
-        finally:
-            vision.release()
+        self.motion.grab()
+        self.eyes.happy()
 
     def _do_sleep(self) -> None:
         assert self.motion is not None
